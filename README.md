@@ -308,12 +308,6 @@ Perfect for both personal projects and commercial applications.
 
 ---
 
-## 🤝 Contributing
-
-Found a bug or have a suggestion? Please open an issue or submit a pull request.
-
----
-
 ## 📝 Changelog
 
 ### Version 3.1 (Current)
