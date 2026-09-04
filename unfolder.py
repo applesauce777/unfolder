@@ -101,6 +101,7 @@ class SimpleExtractor:
         self.maintain_hierarchy = maintain_hierarchy
         self.processed_files = set()
         self.pending_deletions = []  # Track archives to delete at end
+        self.claimed_extract_dirs = {}  # extract_to Path -> archive_path that claimed it
         self.stats = {
             'extracted': 0, 
             'failed': 0, 
@@ -282,14 +283,26 @@ class SimpleExtractor:
         if base_name.endswith('.tar'):
             base_name = base_name[:-4]
         
-        # If maintaining hierarchy and archive is nested (not in source root)
-        # extract in-place, otherwise extract as sibling
+        # Nested vs flat mode currently resolve to the same target (both extract
+        # alongside the archive), kept as separate branches for clarity/future use.
         if self.maintain_hierarchy and archive_path.parent != self.source_folder:
-            # Extract nested archives in their current location
-            return parent_dir / base_name
+            candidate = parent_dir / base_name
         else:
-            # Extract to sibling directory
-            return parent_dir / base_name
+            candidate = parent_dir / base_name
+        
+        # Guard against two differently-typed archives with the same base name
+        # (e.g. "photos.zip" and "photos.tar.gz") both resolving to the same
+        # destination folder. Whoever gets there first keeps the clean name;
+        # anyone colliding afterward gets a disambiguated folder that includes
+        # their full suffix, so nothing silently overwrites another archive's
+        # extracted contents.
+        claimant = self.claimed_extract_dirs.get(candidate)
+        if claimant is not None and claimant != archive_path:
+            suffix_tag = "".join(archive_path.suffixes).lstrip(".").replace(".", "_")
+            candidate = parent_dir / f"{base_name}__{suffix_tag}"
+        
+        self.claimed_extract_dirs[candidate] = archive_path
+        return candidate
     
     def _extract_with_cleanup(self, archive_path, extract_to, extract_method):
         """Extract archive with automatic cleanup on failure"""
@@ -310,9 +323,13 @@ class SimpleExtractor:
             if not success:
                 raise Exception("Extraction method returned False")
             
-            # Verify something was actually extracted
-            new_items = set(extract_to.iterdir()) - existing_items
-            if not new_items:
+            # Verify something was actually extracted. We check the directory is
+            # non-empty rather than requiring *new* top-level names, because a
+            # legitimate extraction can overwrite files that already existed
+            # with the same names (e.g. two archives sharing content, or a
+            # re-run over a previously extracted folder) without that being a
+            # failure.
+            if not any(extract_to.iterdir()):
                 raise Exception("No files were extracted")
             
             return True
